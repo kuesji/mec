@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+# [ mec - 6 april 2020 - kuesji koesnu(kuesji@koesnu.com) ]
+
+import sys
+
+def tokenize(data):
+ index = 0
+ tokens = []
+
+ ops = [
+  "+","-","*","/","%",
+  "&","^","|",
+  "**"
+ ]
+
+ while index < len(data):
+  value = ""
+
+  if data[index].isnumeric():
+   while index < len(data):
+    if not data[index].isnumeric():
+     if data[index] == '.':
+      if '.' in value:
+       break
+     else:
+      break
+    value += data[index]
+    index += 1
+   tokens.append(["number",value])
+  elif data[index] in ops:
+   while index < len(data):
+    if value+data[index] not in ops:
+     break
+    value += data[index]
+    index += 1
+   tokens.append(["op",value])
+  elif data[index] in ["(",")"]:
+   tokens.append(["paranthesis",data[index]])
+   index += 1
+  else:
+   print("error: unknown character ({})".format(data[index]))
+   return []
+    
+ return tokens
+
+def parse_unary(data):
+ result = []
+ index = 0
+ unary_count = 0
+ last = None
+ for token in data:
+  if token == ["op","-"] and (last == None or last[0] != "number"):
+   unary_count += 1
+  elif token[0] == "number" and unary_count > 0:
+   sign = ""
+   if unary_count % 2 != 0:
+    sign += "-"
+   result.append(["number","{}{}".format(sign,token[1])])
+   unary_count = 0
+   last = None
+  else:
+   result.append(token)
+  last = token
+
+ return result
+
+def parse_group(data):
+ result = [ [] ]
+ group = []
+
+ depth = 0
+ gid = 1
+
+ index = 0
+ while index < len(data):
+  if data[index][0] == "paranthesis":
+   if data[index][1] == "(":
+    result.append([])
+    depth += 1
+   elif data[index][1] == ")":
+    if depth < 1:
+     print("paranthesis doesn't match")
+     return []
+   
+    tmp = result.pop()
+    result[-1].append(["group",gid])
+    group.append([gid,depth,tmp])
+    depth -= 1
+    gid += 1
+  else:
+   result[-1].append(data[index])
+  index += 1
+
+
+ #sort groups
+ group = sorted(group, key=lambda g: g[1], reverse=True)
+
+ group.append([0,0,result[0]])
+ return group
+
+def parse_statements(data):
+
+ precedences = [
+  ["**"],
+  ["*","/","%"],
+  ["+","-"],
+  ["&","|","^"]
+ ]
+
+ bytecode = []
+ gid_table = {}
+
+ for gid,depth,tokens in data:
+  for precedence in precedences:
+   index = 0
+   while index < len(tokens):
+    if tokens[index][0] == "op" and tokens[index][1] in precedence:
+     left = None
+     op = tokens[index]
+     right = None
+
+     if index-1 >= 0:
+      left = tokens[index-1]
+      if left[0] == "group":
+       left = ["variable",gid_table[left[1]]]
+      
+     if index+1 < len(tokens):
+      right = tokens[index+1]
+      if right[0] == "group":
+       right = ["variable",gid_table[right[1]]]
+
+     valid_types = ["number","variable"]
+     if left and left[0] in valid_types and right and right[0] in valid_types:
+      bytecode.append([left[1],op[1],right[1]])
+      del tokens[index+1]
+      del tokens[index]
+      tokens[index-1] = ["variable","v{}".format(len(bytecode)-1)]
+     else:
+      # broken  statement
+      print("error: left or/and right values can't found")
+      return []
+    else:
+     index += 1
+     
+  gid_table[gid] = "v{}".format(len(bytecode)-1)
+   
+ return bytecode
+
+def parse(data):
+ tokens = tokenize(data)
+ tokens = parse_unary(tokens)
+ tokens = parse_group(tokens)
+ statements = parse_statements(tokens)
+ return statements
+
+def execute(data):
+
+ variables = []
+
+ ops = {
+  "+": lambda l,r: l+r,
+  "-": lambda l,r: l-r,
+  "*": lambda l,r: l*r,
+  "/": lambda l,r: l/r,
+  "%": lambda l,r: l%r,
+  "**": lambda l,r: l**r,
+  "&": lambda l,r: l&r,
+  "|": lambda l,r: l|r,
+  "^": lambda l,r: l^r  
+ }
+
+ for statement in data:
+  left = statement[0]
+  if left[0] == "v":
+   left = variables[int(left[1:])]
+  elif '.' in left:
+   left = float(left)
+  else:
+   left = int(left)
+
+  op = statement[1]
+  right = statement[2]
+  if right[0] == "v":
+   right = variables[int(right[1:])]
+  elif '.' in right:
+   right = float(right)
+  else:
+   right = int(right)
+
+  if op in ops:
+   variables.append(ops[op](left,right))
+  else:
+   print("error: {} operator in unsupported")
+   return None   
+
+ return variables[-1]
+
+def main(args):
+ if len(args) > 1:
+  for i in range(1,len(args)):
+   bytecode = parse(args[i])
+   result = execute(bytecode)
+   print(result)
+ else:
+  usage = """[ mec - 6 april 2020 - kuesji koesnu (kuesji@koesnu.com) ]
+
+ usage:
+  mec "expr"
+  or
+  mec "expr" "expr" ...
+
+ sample:
+  mec "8-4*16/2"
+  or
+  mec "2*((6+4)*2)"
+  or
+  mec "8-4*16/2" "16-4/2**16"
+
+ valid operations:
+  + -> addition
+  - -> subtraction
+  * -> multiplication
+  / -> division
+  % -> remainder
+  ** -> power
+  & -> bitwise and
+  | -> bitwise or
+  ^ -> bitwise xor
+"""
+  print(usage)
+
+if __name__ == '__main__':
+ main(sys.argv)
